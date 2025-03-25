@@ -114,3 +114,4 @@ Store gitlab-secrets.yaml in a secure location. You need it to restore your back
 Additional Information
 GitLab chart Backup/Restore Introduction
 Restoring a GitLab installation
+### Adding a test edit ###
