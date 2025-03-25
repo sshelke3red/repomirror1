@@ -1,0 +1,116 @@
+Backing up a GitLab installation
+Tier: Free, Premium, Ultimate
+Offering: GitLab Self-Managed
+GitLab backups are taken by running the backup-utility command in the Toolbox pod provided in the chart. Backups can also be automated by enabling the Cron based backup functionality of this chart.
+
+Before running the backup for the first time, you should ensure the Toolbox is properly configured for access to object storage.
+
+Follow these steps for backing up a GitLab Helm chart based installation.
+
+Create the backup
+Ensure the toolbox pod is running, by executing the following command
+
+Shell
+Copy to clipboard
+kubectl get pods -lrelease=RELEASE_NAME,app=toolbox
+Run the backup utility
+
+Shell
+Copy to clipboard
+kubectl exec <Toolbox pod name> -it -- backup-utility
+Visit the gitlab-backups bucket in the object storage service and ensure a tarball has been added. It will be named in <timestamp>_gitlab_backup.tar format. Read what the backup timestamp is about.
+
+This tarball is required for restoration.
+
+Cron based backup
+The Kubernetes CronJob created by the Helm chart sets the cluster-autoscaler.kubernetes.io/safe-to-evict: "false" annotation on the jobTemplate. Some Kubernetes environments, such as GKE Autopilot, don’t allow this annotation to be set and will not create Job Pods for the backup. This annotation can be changed by setting the gitlab.toolbox.backups.cron.safeToEvict parameter to true, which will allow the Jobs to be created but at the risk of being evicted and corrupting the backup.
+
+Cron based backups can be enabled in this chart to happen at regular intervals as defined by the Kubernetes schedule.
+
+You need to set the following parameters:
+
+gitlab.toolbox.backups.cron.enabled: Set to true to enable cron based backups
+gitlab.toolbox.backups.cron.schedule: Set as per the Kubernetes schedule docs
+gitlab.toolbox.backups.cron.extraArgs: Optionally set extra arguments for backup-utility (like --skip db or --s3tool awscli)
+Backup utility extra arguments
+The backup utility can take some extra arguments.
+
+Skipping components
+Skip components by using the --skip argument. Valid components names can be found at Excluding specific data from the backup.
+
+Each component must have its own --skip argument. For example:
+
+Shell
+Copy to clipboard
+kubectl exec <Toolbox pod name> -it -- backup-utility --skip db --skip lfs
+Cleanup backups only
+Run the backup cleanup without creating a new backup.
+
+Shell
+Copy to clipboard
+kubectl exec <Toolbox pod name> -it -- backup-utility --cleanup
+Specify S3 tool to use
+The backup-utility command uses s3cmd by default to connect to object storage. You may want to override this extra argument in cases where the s3cmd is less reliable than other S3 tools.
+
+There is a known issue where a backup job crashes with ERROR: S3 error: 404 (NoSuchKey): The specified key does not exist. when GitLab uses an S3 bucket as CI job artifact storage and the default s3cmd CLI tool is being used. Switching from s3cmd to awscli allows backup jobs to run successfully. See issue 3338 for further details.
+
+The S3 CLI tool to use can be either s3cmd or awscli.
+
+Shell
+Copy to clipboard
+kubectl exec <Toolbox pod name> -it -- backup-utility --s3tool awscli
+Using MinIO with awscli
+To use MinIO as the object storage when using awscli, set the following parameters:
+
+YAML
+Copy to clipboard
+gitlab:
+  toolbox:
+    extraEnvFrom:
+      AWS_ACCESS_KEY_ID:
+        secretKeyRef:
+          name: <MINIO-SECRET-NAME>
+          key: accesskey
+      AWS_SECRET_ACCESS_KEY:
+        secretKeyRef:
+          name: <MINIO-SECRET-NAME>
+          key: secretkey
+    extraEnv:
+      AWS_DEFAULT_REGION: us-east-1 # MinIO default
+    backups:
+      cron:
+        enabled: true
+        schedule: "@daily"
+        extraArgs: "--s3tool awscli --aws-s3-endpoint-url <MINIO-INGRESS-URL>"
+The S3 CLI tool s5cmd support is under investigation. See issue 523 to track the progress.
+
+Server-side repository backups
+History 
+Instead of storing large repository backups in the backup archive, repository backups can be configured so that the Gitaly node that hosts each repository is responsible for creating the backup and streaming it to object storage. This helps reduce the network resources required to create and restore a backup.
+
+See Create server-side repository backups.
+
+Other arguments
+To see a complete list of available arguments, run the following command:
+
+Shell
+Copy to clipboard
+kubectl exec <Toolbox pod name> -it -- backup-utility --help
+Back up the secrets
+You also need to save a copy of the rails secrets as these are not included in the backup as a security precaution. We recommend keeping your full backup that includes the database separate from the copy of the secrets.
+
+Find the object name for the rails secrets
+
+Shell
+Copy to clipboard
+kubectl get secrets | grep rails-secret
+Save a copy of the rails secrets
+
+Shell
+Copy to clipboard
+kubectl get secrets <rails-secret-name> -o jsonpath="{.data['secrets\.yml']}" | base64 --decode > gitlab-secrets.yaml
+Store gitlab-secrets.yaml in a secure location. You need it to restore your backups.
+
+Additional Information
+GitLab chart Backup/Restore Introduction
+Restoring a GitLab installation
